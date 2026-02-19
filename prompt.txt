@@ -1,0 +1,101 @@
+Create a simple beginner Japanese hiragana writing practice web app.
+
+The goal is a fast MVP, not a polished product.
+The app should allow users to practice writing hiragana characters and simple words using only hiragana.
+
+Technical requirements
+Use plain HTML, CSS, and JavaScript.
+No frameworks.
+Everything should run in a single HTML file.
+Must work on both desktop and mobile browsers.
+Use an HTML5 canvas for drawing.
+
+Core features
+1. Writing canvas
+Large canvas centered on the screen.
+White background, thin grey border.
+User can draw using mouse or touch.
+Smooth lines while drawing.
+
+2. Clear button
+Button labeled: “Clear”.
+Clears the canvas completely.
+
+3. Target display
+At the top of the screen, display:
+Write: [target word]
+Meaning: [english]
+
+Example:
+Write: あい
+Meaning: love
+
+4. Check button
+Button labeled: “Check”.
+When pressed:
+Capture the canvas drawing.
+Compare it to a very simple template.
+Show:
+“Good enough!” or
+“Try again.”
+For now, the comparison can be very basic:
+Just check if something was drawn.
+If drawing exists → show “Good enough!”
+If blank → show “Try again.”
+(This is temporary. Real recognition will be added later.)
+
+5. Word list
+Include a small built-in starter word list.
+Use this exact data structure in JavaScript:
+const words = [
+  { word: "あい", meaning: "love" },
+  { word: "あう", meaning: "to meet" },
+  { word: "いえ", meaning: "house" },
+  { word: "うえ", meaning: "up" },
+  { word: "あお", meaning: "blue" },
+  { word: "ねこ", meaning: "cat" },
+  { word: "いぬ", meaning: "dog" },
+  { word: "くろ", meaning: "black" },
+  { word: "しろ", meaning: "white" }
+];
+
+6. Next word button
+Button labeled: “Next”.
+Moves to the next word in the list.
+Loops back to the start when finished.
+Clears the canvas automatically.
+Layout
+
+Simple vertical layout:
+Title: “Hiragana Writing Practice”
+Target word + meaning
+Canvas
+
+Buttons:
+Clear
+Check
+Next
+
+Result text area:
+Use simple, clean styling:
+Centered content
+Rounded buttons
+Mobile-friendly spacing
+No external fonts
+Drawing logic
+
+Implement:
+Mouse and touch drawing
+Track when drawing starts and ends
+Smooth lines using lineTo
+Extra details
+Canvas should resize for mobile screens.
+Use a max width of about 400–500px.
+Buttons should be large enough for touch.
+
+Output
+Return:
+A complete, working HTML file.
+No explanations.
+No extra commentary.
+Just the code.
