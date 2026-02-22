@@ -296,6 +296,7 @@
             color: #475569;
         }
     </style>
+    <script src="kanjivg-loader.js"></script>
 </head>
 
 <body>
@@ -309,11 +310,16 @@
             <button class="tab" data-mode="katakana" onclick="switchMode('katakana')">
                 カタカナ<br><span style="font-size:0.75rem;opacity:0.7">Katakana</span>
             </button>
-            <button class="tab" data-mode="kanji" disabled>
-                漢字<br><span class="tab-lock">🔒 Coming soon</span>
+            <button class="tab" data-mode="kanji" onclick="switchMode('kanji')">
+                漢字<br><span style="font-size:0.75rem;opacity:0.7">Kanji</span>
             </button>
         </div>
     </header>
+    <div id="search-area" style="text-align:center; padding: 10px;">
+        <input type="text" id="custom-char" placeholder="Type a character to practice..."
+            style="background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 8px; border-radius: 4px; width: 200px;">
+        <button class="action" onclick="practiceCustom()" style="padding: 8px 16px;">Go</button>
+    </div>
 
     <main>
         <div id="script-label"></div>
@@ -486,6 +492,18 @@
                     { word: "アイス", meaning: "ice / ice cream" },
                     { word: "コーロ", meaning: "chorus" }
                 ]
+            },
+            kanji: {
+                label: "漢字 · Kanji",
+                accentVar: "--kanji",
+                accentHex: "#fb923c",
+                words: [
+                    { word: "学生", meaning: "student" },
+                    { word: "学校", meaning: "school" },
+                    { word: "日本", meaning: "Japan" },
+                    { word: "私", meaning: "I / Me" },
+                    { word: "学", meaning: "study" }
+                ]
             }
         };
 
@@ -515,9 +533,16 @@
         }
 
         // Pre-sample all templates once
+        // Updated to be more flexible for dynamic loading
         const templates = {};
+        function updateTemplatesForChar(ch, paths) {
+            if (!templates[ch]) {
+                templates[ch] = paths.map(d => samplePath(d, SAMPLE_N));
+            }
+        }
+
         for (const [ch, paths] of Object.entries(KVG)) {
-            templates[ch] = paths.map(d => samplePath(d, SAMPLE_N));
+            updateTemplatesForChar(ch, paths);
         }
 
         function resample(pts, n) {
@@ -739,7 +764,7 @@
             }
         }
 
-        function advanceCharacter() {
+        async function advanceCharacter() {
             const word = MODES[currentMode].words[currentWordIdx].word;
             currentCharIdx++;
             currentStrokeIdx = 0;
@@ -751,9 +776,19 @@
                 updateHint("");
                 return;
             }
+
+            const nextChar = word[currentCharIdx];
+            // Fetch missing data
+            if (!KVG[nextChar]) {
+                const paths = await KanjiVGLoader.fetchPaths(nextChar);
+                if (paths) {
+                    KVG[nextChar] = paths;
+                    updateTemplatesForChar(nextChar, paths);
+                }
+            }
+
             setTimeout(() => {
                 ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-                const nextChar = word[currentCharIdx];
                 buildGuide(nextChar);
                 buildDots(nextChar);
                 updateHint(nextChar);
@@ -795,7 +830,7 @@
             if (next) next.classList.add("active");
         }
 
-        function showWord() {
+        async function showWord() {
             const data = MODES[currentMode];
             document.getElementById("script-label").textContent = data.label;
             document.getElementById("script-label").style.color = data.accentHex;
@@ -806,6 +841,20 @@
             document.getElementById("meaning").textContent = "Meaning: " + entry.meaning;
             document.getElementById("progress").textContent =
                 `Word ${currentWordIdx + 1} of ${data.words.length}`;
+
+            // Fetch missing data for all characters in the word
+            for (const char of entry.word) {
+                if (!KVG[char]) {
+                    setResult(`Fetching character data: ${char}...`, "");
+                    const paths = await KanjiVGLoader.fetchPaths(char);
+                    if (paths) {
+                        KVG[char] = paths;
+                        updateTemplatesForChar(char, paths);
+                    } else {
+                        setResult(`Could not find data for ${char}`, "bad");
+                    }
+                }
+            }
 
             currentCharIdx = 0;
             currentStrokeIdx = 0;
@@ -865,6 +914,16 @@
             const words = MODES[currentMode].words;
             currentWordIdx = (currentWordIdx + 1) % words.length;
             showWord();
+        }
+
+        async function practiceCustom() {
+            const val = document.getElementById("custom-char").value.trim();
+            if (!val) return;
+
+            // Artificial entry
+            MODES[currentMode].words.push({ word: val, meaning: "Custom search" });
+            currentWordIdx = MODES[currentMode].words.length - 1;
+            await showWord();
         }
 
         // ── Init ──────────────────────────────────────────────

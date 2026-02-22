@@ -172,6 +172,7 @@
             margin-top: 10px;
         }
     </style>
+    <script src="kanjivg-loader.js"></script>
 </head>
 
 <body>
@@ -295,8 +296,13 @@
 
         // Pre-sample all template paths (in KVG coordinate space)
         const templates = {};
+        function updateTemplatesForChar(ch, paths) {
+            if (!templates[ch]) {
+                templates[ch] = paths.map(d => sampleSVGPath(d, SAMPLE_N));
+            }
+        }
         for (const [char, paths] of Object.entries(KVG)) {
-            templates[char] = paths.map(d => sampleSVGPath(d, SAMPLE_N));
+            updateTemplatesForChar(char, paths);
         }
 
         // ─────────────────────────────────────────────
@@ -547,7 +553,7 @@
             }
         }
 
-        function advanceCharacter(lastOk) {
+        async function advanceCharacter(lastOk) {
             const word = words[currentWordIdx].word;
             currentCharIdx++;
             currentStrokeIdx = 0;
@@ -561,13 +567,23 @@
                 return;
             }
 
+            const nextChar = word[currentCharIdx];
+            // Fetch missing data
+            if (!KVG[nextChar]) {
+                const paths = await KanjiVGLoader.fetchPaths(nextChar);
+                if (paths) {
+                    KVG[nextChar] = paths;
+                    updateTemplatesForChar(nextChar, paths);
+                }
+            }
+
             // Move to next character
             setTimeout(() => {
                 ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-                buildGuidePaths(word[currentCharIdx]);
-                buildDots(word[currentCharIdx]);
-                updateStrokeHint(word[currentCharIdx]);
-                setResult("Now write: " + word[currentCharIdx], "");
+                buildGuidePaths(nextChar);
+                buildDots(nextChar);
+                updateStrokeHint(nextChar);
+                setResult("Now write: " + nextChar, "");
             }, 300);
         }
 
@@ -606,12 +622,24 @@
             if (d) d.className = "stroke-dot " + (ok ? "done-ok" : "done-bad");
         }
 
-        function showWord() {
+        async function showWord() {
             const word = words[currentWordIdx].word;
             document.getElementById("target").textContent = "Write: " + word;
             document.getElementById("meaning").textContent = "Meaning: " + words[currentWordIdx].meaning;
             document.getElementById("progress").textContent =
                 `Word ${currentWordIdx + 1} of ${words.length}`;
+
+            // Fetch missing data for all characters in the word
+            for (const char of word) {
+                if (!KVG[char]) {
+                    const paths = await KanjiVGLoader.fetchPaths(char);
+                    if (paths) {
+                        KVG[char] = paths;
+                        updateTemplatesForChar(char, paths);
+                    }
+                }
+            }
+
             currentCharIdx = 0;
             currentStrokeIdx = 0;
             completedStrokes = [];
