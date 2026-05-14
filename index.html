@@ -503,6 +503,7 @@
         <div id="quiz-modal">
             <div id="quiz-title">✎ Quick Quiz</div>
             <div id="quiz-word-display"></div>
+            <div id="quiz-meaning" style="font-size:0.8rem;color:var(--muted);margin-bottom:16px;"></div>
             <div id="quiz-options"></div>
             <button id="quiz-continue" class="action" onclick="dismissQuiz()" style="background:#6d28d9;color:#fff;padding:8px 20px;font-size:0.9rem;">Continue →</button>
             <br><br>
@@ -1191,13 +1192,25 @@
             const entry = wordHistory[Math.floor(Math.random() * wordHistory.length)];
             const word = entry.word;
             const blankIdx = Math.floor(Math.random() * word.length);
-            const correctChar = word[blankIdx];
 
-            // Build distractors from all characters in word history
+            // Find ALL valid characters for this blank from practiced words
+            // e.g. あ? accepts both い (あい) and う (あう)
+            const validChars = new Set();
+            for (const he of wordHistory) {
+                if (he.word.length === word.length) {
+                    let match = true;
+                    for (let i = 0; i < word.length; i++) {
+                        if (i !== blankIdx && he.word[i] !== word[i]) { match = false; break; }
+                    }
+                    if (match) validChars.add(he.word[blankIdx]);
+                }
+            }
+
+            // Build distractors from characters NOT in valid set
             const pool = [...new Set(wordHistory.flatMap(e => [...e.word]))]
-                .filter(c => c !== correctChar);
+                .filter(c => !validChars.has(c));
             const distractors = shuffle(pool).slice(0, 3);
-            const options = shuffle([...distractors, correctChar]);
+            const options = shuffle([...distractors, ...validChars]);
 
             // Render word display
             const displayEl = document.getElementById("quiz-word-display");
@@ -1209,6 +1222,9 @@
                 displayEl.appendChild(span);
             });
 
+            // Show meaning for context
+            document.getElementById("quiz-meaning").textContent = "Meaning: " + entry.meaning;
+
             // Render option tiles
             const optionsEl = document.getElementById("quiz-options");
             optionsEl.innerHTML = "";
@@ -1219,13 +1235,17 @@
                 tile.onclick = () => {
                     if (quizAnswered) return;
                     quizAnswered = true;
+                    const ok = validChars.has(ch);
                     document.querySelectorAll(".quiz-tile").forEach(t => {
                         t.onclick = null;
-                        if (t.textContent === correctChar) t.classList.add("quiz-correct");
+                        if (validChars.has(t.textContent)) t.classList.add("quiz-correct");
                         else if (t.textContent === ch) t.classList.add("quiz-wrong");
                     });
-                    const ok = ch === correctChar;
-                    setResult(ok ? "✓ Quiz: Correct!" : `✗ Quiz: It was 「${correctChar}」`, ok ? "good" : "bad");
+                    const validList = [...validChars].join("「");
+                    const msg = ok
+                        ? validChars.size > 1 ? `✓ Quiz: 「${ch}」 works!` : "✓ Quiz: Correct!"
+                        : `✗ Quiz: Try 「${[...validChars].join("」 or 「")}」`;
+                    setResult(msg, ok ? "good" : "bad");
                     document.getElementById("quiz-continue").classList.add("show");
                 };
                 optionsEl.appendChild(tile);
