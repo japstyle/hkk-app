@@ -27,6 +27,7 @@
             --kanji: #fb923c;
             /* amber — locked */
             --good: #4ade80;
+            --amber: #eab308;
             --bad: #f87171;
         }
 
@@ -228,9 +229,19 @@
             border-color: #94a3b8;
         }
 
-        .stroke-dot.done-ok {
+        .stroke-dot.done-great {
             background: var(--good);
             border-color: #16a34a;
+        }
+
+        .stroke-dot.done-good {
+            background: #14b8a6;
+            border-color: #0d9488;
+        }
+
+        .stroke-dot.done-nearly {
+            background: var(--amber);
+            border-color: #a16207;
         }
 
         .stroke-dot.done-bad {
@@ -290,8 +301,16 @@
             min-height: 1.3em;
         }
 
-        #result.good {
+        #result.great {
             color: var(--good);
+        }
+
+        #result.good {
+            color: #14b8a6;
+        }
+
+        #result.nearly {
+            color: var(--amber);
         }
 
         #result.bad {
@@ -537,7 +556,7 @@
         // ═══════════════════════════════════════════════════════
         const KVG_SIZE = 109;
         const SAMPLE_N = 64;
-        const THRESHOLD = 28;
+        const THRESHOLD = 38;
 
         function samplePath(d, n) {
             const ns = "http://www.w3.org/2000/svg";
@@ -842,10 +861,14 @@
             }
 
             const dist = recognizeStroke(currentStrokePts, tmplStrokes[expected.strokeIdx]);
-            const ok = dist < THRESHOLD;
-            completedStrokes.push({ pts: currentStrokePts, color: ok ? "#16a34a" : "#dc2626" });
+            const rating = dist < 15 ? "great" : dist < 28 ? "good" : dist < THRESHOLD ? "nearly" : "tryagain";
+            const colorMap = { great: "#22c55e", good: "#14b8a6", nearly: "#eab308", tryagain: "#ef4444" };
+            const resultMap = { great: "✓ Great!", good: "✓ Good", nearly: "~ Nearly", tryagain: "✗ Try again" };
+            completedStrokes.push({ pts: currentStrokePts, color: colorMap[rating] });
             redrawStrokes();
-            updateDot(completedStrokes.length - 1, ok);
+            updateDot(completedStrokes.length - 1, rating);
+            const resultClass = rating === "tryagain" ? "bad" : rating === "nearly" ? "nearly" : rating === "good" ? "good" : "great";
+            setResult(resultMap[rating], resultClass);
 
             // Check if word is complete
             const next = getCurrentCharAndStroke();
@@ -893,9 +916,10 @@
             }
         }
 
-        function updateDot(idx, ok) {
+        function updateDot(idx, rating) {
+            const dotClass = rating === "great" ? "done-great" : rating === "good" ? "done-good" : rating === "nearly" ? "done-nearly" : "done-bad";
             const d = document.getElementById("dot-" + idx);
-            if (d) d.className = "stroke-dot " + (ok ? "done-ok" : "done-bad");
+            if (d) d.className = "stroke-dot " + dotClass;
             const next = document.getElementById("dot-" + (idx + 1));
             if (next) next.classList.add("active");
         }
@@ -974,13 +998,16 @@
 
         function checkWord() {
             const all = document.querySelectorAll(".stroke-dot");
-            const ok = document.querySelectorAll(".stroke-dot.done-ok").length;
+            const great = document.querySelectorAll(".stroke-dot.done-great").length;
+            const good = document.querySelectorAll(".stroke-dot.done-good").length;
+            const nearly = document.querySelectorAll(".stroke-dot.done-nearly").length;
+            const ok = great + good + nearly;
             if (all.length === 0) { setResult("Draw something first.", "bad"); return; }
             setResult(
                 ok === all.length
-                    ? `✓ All ${ok} strokes correct!`
-                    : `${ok} of ${all.length} strokes matched.`,
-                ok === all.length ? "good" : (ok > all.length / 2 ? "" : "bad")
+                    ? `✓ ${great} great, ${good} good, ${nearly} nearly`
+                    : `${ok}/${all.length} strokes passed`,
+                ok === all.length ? "good" : (ok > all.length / 2 ? "nearly" : "bad")
             );
         }
 
