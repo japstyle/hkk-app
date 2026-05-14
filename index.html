@@ -657,6 +657,28 @@
         let currentStrokePts = [];
         let completedStrokes = [];
 
+        function getCurrentCharAndStroke() {
+            // Derive current position from completed stroke count
+            const word = MODES[currentMode].words[currentWordIdx].word;
+            let remaining = completedStrokes.length;
+            for (let ci = 0; ci < word.length; ci++) {
+                const paths = KVG[word[ci]];
+                const n = paths ? paths.length : 0;
+                if (remaining < n) return { charIdx: ci, strokeIdx: remaining };
+                remaining -= n;
+            }
+            return null; // all strokes complete
+        }
+
+        function totalStrokesInWord(word) {
+            let n = 0;
+            for (const ch of word) {
+                const p = KVG[ch];
+                if (p) n += p.length;
+            }
+            return n;
+        }
+
         // ── Resize ────────────────────────────────────────────
         function setCanvasSize() {
             CANVAS_SIZE = Math.min(window.innerWidth - 32, 340);
@@ -690,31 +712,37 @@
         }
 
         // ── Guide overlay ─────────────────────────────────────
-        function buildGuide(char) {
+        function buildWordGuide(word) {
             guideSVG.innerHTML = "";
-            const paths = KVG[char];
-            if (!paths) return;
+            const n = word.length;
             const scale = CANVAS_SIZE / KVG_SIZE;
+            const regionScale = scale / n;
             const accent = MODES[currentMode].accentHex;
-            paths.forEach((d, i) => {
-                const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                p.setAttribute("d", d);
-                p.setAttribute("transform", `scale(${scale})`);
-                p.setAttribute("fill", "none");
-                p.setAttribute("stroke", i === currentStrokeIdx
-                    ? `${accent}44`   // active stroke slightly more visible
-                    : `${accent}1a`);
-                p.setAttribute("stroke-width", (5 * scale).toString());
-                p.setAttribute("stroke-linecap", "round");
-                p.setAttribute("stroke-linejoin", "round");
-                guideSVG.appendChild(p);
-            });
+            let gidx = 0;
+            for (let ci = 0; ci < n; ci++) {
+                const paths = KVG[word[ci]];
+                if (!paths) continue;
+                const tx = ci * CANVAS_SIZE / n;
+                paths.forEach((d) => {
+                    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    p.setAttribute("d", d);
+                    p.setAttribute("transform", `translate(${tx},0) scale(${regionScale})`);
+                    p.setAttribute("fill", "none");
+                    p.setAttribute("stroke", `${accent}1a`);
+                    p.setAttribute("stroke-width", (5 * regionScale).toString());
+                    p.setAttribute("stroke-linecap", "round");
+                    p.setAttribute("stroke-linejoin", "round");
+                    p.dataset.gidx = gidx++;
+                    guideSVG.appendChild(p);
+                });
+            }
         }
 
-        function highlightGuide(idx) {
+        function highlightGuide(globalIdx) {
             const accent = MODES[currentMode].accentHex;
-            guideSVG.querySelectorAll("path").forEach((p, i) => {
-                p.setAttribute("stroke", i === idx ? `${accent}44` : `${accent}1a`);
+            guideSVG.querySelectorAll("path").forEach(p => {
+                const gidx = parseInt(p.dataset.gidx);
+                p.setAttribute("stroke", gidx === globalIdx ? `${accent}44` : `${accent}1a`);
             });
         }
 
@@ -793,58 +821,46 @@
         // ── Stroke evaluation ─────────────────────────────────
         function evaluateStroke() {
             const word = MODES[currentMode].words[currentWordIdx].word;
-            const char = word[currentCharIdx];
+            const nChars = word.length;
+
+            // Determine which character region the stroke was drawn in
+            const cx = currentStrokePts.reduce((s, p) => s + p.x, 0) / currentStrokePts.length;
+            const drawnCharIdx = Math.min(Math.floor(cx / (CANVAS_SIZE / nChars)), nChars - 1);
+
+            // What stroke is expected next?
+            const expected = getCurrentCharAndStroke();
+            if (!expected) return; // word already complete
+
+            const char = word[expected.charIdx];
             const tmplStrokes = templates[char];
-            if (!tmplStrokes || currentStrokeIdx >= tmplStrokes.length) return;
+            if (!tmplStrokes || expected.strokeIdx >= tmplStrokes.length) return;
 
-            const dist = recognizeStroke(currentStrokePts, tmplStrokes[currentStrokeIdx]);
-            const ok = dist < THRESHOLD;
-            completedStrokes.push({ pts: currentStrokePts, color: ok ? "#16a34a" : "#dc2626" });
-            redrawStrokes();
-            updateDot(currentStrokeIdx, ok);
-            currentStrokeIdx++;
-
-            if (currentStrokeIdx >= tmplStrokes.length) {
-                advanceCharacter();
-            } else {
-                updateHint(char);
-                highlightGuide(currentStrokeIdx);
-            }
-        }
-
-        async function advanceCharacter() {
-            const word = MODES[currentMode].words[currentWordIdx].word;
-            currentCharIdx++;
-            currentStrokeIdx = 0;
-            completedStrokes = [];
-
-            if (currentCharIdx >= word.length) {
-                setResult("✓ Word complete! Press Next →", "good");
-                guideSVG.innerHTML = "";
-                updateHint("");
+            // Must draw in the correct character's region
+            if (drawnCharIdx !== expected.charIdx) {
+                setResult(`Draw next stroke in the 「${char}」 region`, "bad");
                 return;
             }
 
-            const nextChar = word[currentCharIdx];
-            // Fetch missing data
-            if (!KVG[nextChar]) {
-                const paths = await KanjiVGLoader.fetchPaths(nextChar);
-                if (paths) {
-                    KVG[nextChar] = paths;
-                    updateTemplatesForChar(nextChar, paths);
-                } else {
-                    setResult("Could not load data for " + nextChar + ". Try Next →", "bad");
-                    return;
-                }
-            }
+            const dist = recognizeStroke(currentStrokePts, tmplStrokes[expected.strokeIdx]);
+            const ok = dist < THRESHOLD;
+            completedStrokes.push({ pts: currentStrokePts, color: ok ? "#16a34a" : "#dc2626" });
+            redrawStrokes();
+            updateDot(completedStrokes.length - 1, ok);
 
-            setTimeout(() => {
-                ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-                buildGuide(nextChar);
-                buildDots(nextChar);
-                updateHint(nextChar);
-                setResult("Now write: " + nextChar, "");
-            }, 350);
+            // Check if word is complete
+            const next = getCurrentCharAndStroke();
+            if (!next) {
+                setResult("✓ Word complete! Press Next →", "good");
+                updateGlobalHint(word);
+            } else {
+                updateGlobalHint(word);
+                highlightGuide(completedStrokes.length);
+            }
+        }
+
+        function advanceCharacter() {
+            // No-op in multi-char view — evaluateStroke handles sequencing
+            // Characters are tracked implicitly via completedStrokes.length
         }
 
         // ── UI helpers ────────────────────────────────────────
@@ -854,24 +870,27 @@
             el.className = cls;
         }
 
-        function updateHint(char) {
+        function updateGlobalHint(word) {
             const el = document.getElementById("stroke-hint");
-            if (!char) { el.textContent = ""; return; }
+            const expected = getCurrentCharAndStroke();
+            if (!expected) { el.textContent = "Word complete!"; return; }
+            const char = word[expected.charIdx];
             const tmpl = templates[char];
-            el.textContent = tmpl ? `Stroke ${currentStrokeIdx + 1} of ${tmpl.length}` : "";
+            el.textContent = tmpl
+                ? `「${char}」 stroke ${expected.strokeIdx + 1} of ${tmpl.length}`
+                : "";
         }
 
-        function buildDots(char) {
+        function buildWordDots(word) {
             const el = document.getElementById("stroke-indicators");
             el.innerHTML = "";
-            const tmpl = templates[char];
-            if (!tmpl) return;
-            tmpl.forEach((_, i) => {
+            const total = totalStrokesInWord(word);
+            for (let i = 0; i < total; i++) {
                 const d = document.createElement("div");
                 d.className = "stroke-dot" + (i === 0 ? " active" : "");
                 d.id = "dot-" + i;
                 el.appendChild(d);
-            });
+            }
         }
 
         function updateDot(idx, ok) {
@@ -909,54 +928,48 @@
                 }
             }
 
-            currentCharIdx = 0;
-            currentStrokeIdx = 0;
             completedStrokes = [];
             ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-            const firstChar = entry.word[0];
-            // If the first character failed to load, show what we can
-            if (!KVG[firstChar]) {
-                setResult("Stroke data unavailable for this character.", "bad");
+            const allHaveData = [...entry.word].every(ch => KVG[ch]);
+            if (allHaveData) {
+                buildWordGuide(entry.word);
+                buildWordDots(entry.word);
+                updateGlobalHint(entry.word);
+                highlightGuide(completedStrokes.length);
+                setResult(fetchFailed ? "Some characters may not have stroke data." : "", fetchFailed ? "bad" : "");
+            } else {
+                setResult("Stroke data unavailable for some characters.", "bad");
                 guideSVG.innerHTML = "";
                 document.getElementById("stroke-indicators").innerHTML = "";
-                updateHint("");
-            } else {
-                setResult(fetchFailed ? "Some characters may not have stroke data." : "", fetchFailed ? "bad" : "");
-                buildGuide(firstChar);
-                buildDots(firstChar);
-                updateHint(firstChar);
+                document.getElementById("stroke-hint").textContent = "";
             }
         }
 
         // ── Controls ──────────────────────────────────────────
         function clearAll() {
-            currentCharIdx = 0;
-            currentStrokeIdx = 0;
             completedStrokes = [];
             ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
             setResult("", "");
             const word = MODES[currentMode].words[currentWordIdx].word;
-            buildGuide(word[0]);
-            buildDots(word[0]);
-            updateHint(word[0]);
+            buildWordDots(word);
+            updateGlobalHint(word);
+            highlightGuide(0);
         }
 
         function undoStroke() {
-            if (completedStrokes.length === 0 && currentStrokeIdx === 0) return;
-            if (currentStrokeIdx > 0) {
-                currentStrokeIdx--;
-                const removed = document.getElementById("dot-" + currentStrokeIdx);
-                if (removed) removed.className = "stroke-dot active";
-                const undone = document.getElementById("dot-" + (currentStrokeIdx + 1));
-                if (undone) undone.classList.remove("active");
-                completedStrokes.pop();
-                redrawStrokes();
-                const word = MODES[currentMode].words[currentWordIdx].word;
-                highlightGuide(currentStrokeIdx);
-                updateHint(word[currentCharIdx]);
-                setResult("", "");
-            }
+            if (completedStrokes.length === 0) return;
+            completedStrokes.pop();
+            redrawStrokes();
+            const totalNow = completedStrokes.length;
+            // Reset dot states
+            document.querySelectorAll(".stroke-dot").forEach((d, i) => {
+                d.className = "stroke-dot" + (i === totalNow ? " active" : "");
+            });
+            const word = MODES[currentMode].words[currentWordIdx].word;
+            highlightGuide(totalNow);
+            updateGlobalHint(word);
+            setResult("", "");
         }
 
         function checkWord() {
