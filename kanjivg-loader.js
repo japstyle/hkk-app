@@ -1,5 +1,10 @@
 /**
- * Utility to fetch and parse KanjiVG data from jsDelivr CDN
+ * Utility to fetch and parse KanjiVG stroke data.
+ * Sources (tried in order):
+ *   1. raw.githubusercontent.com (reliable, no size limit)
+ *   2. jsDelivr CDN (faster when cached)
+ *
+ * KanjiVG (CC BY-SA 3.0) — https://kanjivg.tagaini.net
  */
 const KanjiVGLoader = {
     cache: {},
@@ -14,36 +19,51 @@ const KanjiVGLoader = {
     },
 
     /**
-     * Fetches paths for a single character
+     * Fetches and parses stroke paths for a single character
      */
     fetchPaths: async function (char) {
         if (this.cache[char]) return this.cache[char];
 
         const hex = this.getHex(char);
-        const url = `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg@master/kanji/${hex}.svg`;
+        let svgText = null;
+
+        // Try sources in order
+        const sources = [
+            `https://raw.githubusercontent.com/kanjivg/kanjivg/master/kanji/${hex}.svg`,
+            `https://cdn.jsdelivr.net/gh/kanjivg/kanjivg@r20250816/kanji/${hex}.svg`
+        ];
+
+        for (const url of sources) {
+            try {
+                const resp = await fetch(url);
+                if (resp.ok) {
+                    svgText = await resp.text();
+                    break;
+                }
+            } catch (_) {
+                // Try next source
+            }
+        }
+
+        if (!svgText) {
+            console.warn(`KanjiVGLoader: could not fetch data for ${char}`);
+            return null;
+        }
 
         try {
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`Failed to fetch character: ${char}`);
-
-            const svgText = await resp.text();
             const parser = new DOMParser();
             const doc = parser.parseFromString(svgText, "image/svg+xml");
 
-            // KanjiVG paths are usually in a <g id="kvg:04eba-g1"> group
-            // but we can just grab all <path> elements that have a 'd' attribute
+            // KanjiVG SVGs contain stroke <path> elements with `d` attributes.
+            // Non-stroke elements use <text> not <path>, so this selector is safe.
             const paths = Array.from(doc.querySelectorAll("path"))
                 .map(p => p.getAttribute("d"))
-                .filter(d => d && !d.includes("stroke")); // Filter out any potential non-path elements
-
-            // Sometimes the first few paths might be labels or metadata groups if the selector is too broad,
-            // but KanjiVG's structure is usually very clean.
-            // Specifically, we want paths that represent the strokes.
+                .filter(d => d);
 
             this.cache[char] = paths;
             return paths;
         } catch (err) {
-            console.error(err);
+            console.warn(`KanjiVGLoader: failed to parse SVG for ${char}`, err);
             return null;
         }
     },

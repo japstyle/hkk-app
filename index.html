@@ -643,7 +643,7 @@
             redrawStrokes();
         }
         function applyCtxStyle() {
-            ctx.lineWidth = 24;
+            ctx.lineWidth = Math.round(5.5 * CANVAS_SIZE / KVG_SIZE);
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
             ctx.strokeStyle = "#1e293b";
@@ -720,9 +720,17 @@
             if (!drawing) return;
             if (e.cancelable) e.preventDefault();
             const pos = getPos(e);
-            ctx.lineTo(pos.x, pos.y);
-            ctx.stroke();
+            const prev = currentStrokePts[currentStrokePts.length - 1];
             currentStrokePts.push(pos);
+            // Draw each segment independently — avoids overlapping stroke artifacts
+            // and keeps feedback responsive. Completed strokes are smoothed
+            // in redrawStrokes() via quadratic bezier curves.
+            if (prev) {
+                ctx.beginPath();
+                ctx.moveTo(prev.x, prev.y);
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+            }
         }
         function endDraw() {
             if (!drawing || currentStrokePts.length < 5) { drawing = false; return; }
@@ -730,16 +738,31 @@
             evaluateStroke();
         }
 
+        // ── Smooth stroke rendering ───────────────────────────
+        function drawSmoothStroke(ctx, pts) {
+            if (pts.length < 2) return;
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            if (pts.length === 2) {
+                ctx.lineTo(pts[1].x, pts[1].y);
+            } else {
+                // Quadratic bezier through midpoints — smooth Catmull-Rom-like curves
+                for (let i = 1; i < pts.length - 1; i++) {
+                    const mx = (pts[i].x + pts[i + 1].x) / 2;
+                    const my = (pts[i].y + pts[i + 1].y) / 2;
+                    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+                }
+                ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+            }
+            ctx.stroke();
+        }
+
         function redrawStrokes() {
             ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-            applyCtxStyle();
             completedStrokes.forEach(s => {
                 ctx.strokeStyle = s.color;
-                ctx.beginPath();
-                s.pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-                ctx.stroke();
+                drawSmoothStroke(ctx, s.pts);
             });
-            ctx.strokeStyle = "#1e293b";
         }
 
         // ── Stroke evaluation ─────────────────────────────────
@@ -784,6 +807,9 @@
                 if (paths) {
                     KVG[nextChar] = paths;
                     updateTemplatesForChar(nextChar, paths);
+                } else {
+                    setResult("Could not load data for " + nextChar + ". Try Next →", "bad");
+                    return;
                 }
             }
 
@@ -843,6 +869,7 @@
                 `Word ${currentWordIdx + 1} of ${data.words.length}`;
 
             // Fetch missing data for all characters in the word
+            let fetchFailed = false;
             for (const char of entry.word) {
                 if (!KVG[char]) {
                     setResult(`Fetching character data: ${char}...`, "");
@@ -851,7 +878,8 @@
                         KVG[char] = paths;
                         updateTemplatesForChar(char, paths);
                     } else {
-                        setResult(`Could not find data for ${char}`, "bad");
+                        setResult(`Could not find stroke data for ${char}`, "bad");
+                        fetchFailed = true;
                     }
                 }
             }
@@ -860,12 +888,20 @@
             currentStrokeIdx = 0;
             completedStrokes = [];
             ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-            setResult("", "");
 
             const firstChar = entry.word[0];
-            buildGuide(firstChar);
-            buildDots(firstChar);
-            updateHint(firstChar);
+            // If the first character failed to load, show what we can
+            if (!KVG[firstChar]) {
+                setResult("Stroke data unavailable for this character.", "bad");
+                guideSVG.innerHTML = "";
+                document.getElementById("stroke-indicators").innerHTML = "";
+                updateHint("");
+            } else {
+                setResult(fetchFailed ? "Some characters may not have stroke data." : "", fetchFailed ? "bad" : "");
+                buildGuide(firstChar);
+                buildDots(firstChar);
+                updateHint(firstChar);
+            }
         }
 
         // ── Controls ──────────────────────────────────────────
