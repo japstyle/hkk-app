@@ -335,7 +335,113 @@
         footer a {
             color: #475569;
         }
-    </style>
+
+        /* ── Quiz overlay ────────────────────────── */
+        #quiz-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 15, 26, 0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+        }
+
+        #quiz-modal {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px 24px 20px;
+            max-width: 360px;
+            width: 100%;
+            text-align: center;
+        }
+
+        #quiz-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 16px;
+            letter-spacing: 0.06em;
+        }
+
+        #quiz-word-display {
+            font-size: 2.2rem;
+            letter-spacing: 0.15em;
+            margin-bottom: 20px;
+            min-height: 3rem;
+        }
+
+        .quiz-char {
+            color: var(--text);
+        }
+
+        .quiz-blank {
+            display: inline-block;
+            color: var(--muted);
+            border-bottom: 3px solid var(--amber);
+            min-width: 1.2em;
+        }
+
+        #quiz-options {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .quiz-tile {
+            width: 64px;
+            height: 64px;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            background: var(--bg);
+            color: var(--text);
+            font-size: 1.6rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .quiz-tile:hover {
+            border-color: var(--muted);
+        }
+
+        .quiz-tile.quiz-correct {
+            background: rgba(74, 222, 128, 0.2);
+            border-color: var(--good);
+        }
+
+        .quiz-tile.quiz-wrong {
+            background: rgba(248, 113, 113, 0.2);
+            border-color: var(--bad);
+        }
+
+        #quiz-continue {
+            display: none;
+            margin: 0 auto;
+        }
+
+        #quiz-continue.show {
+            display: inline-block;
+        }
+
+        #quiz-skip {
+            background: none;
+            border: none;
+            color: var(--muted);
+            font-size: 0.8rem;
+            cursor: pointer;
+            padding: 6px 12px;
+        }
+
+        #quiz-skip:hover {
+            color: var(--text);
+        }
     <script src="kanjivg-loader.js"></script>
 </head>
 
@@ -391,6 +497,17 @@
         <div id="result"></div>
         <div id="progress"></div>
     </main>
+
+    <div id="quiz-overlay">
+        <div id="quiz-modal">
+            <div id="quiz-title">✎ Quick Quiz</div>
+            <div id="quiz-word-display"></div>
+            <div id="quiz-options"></div>
+            <button id="quiz-continue" class="action" onclick="dismissQuiz()" style="background:#6d28d9;color:#fff;padding:8px 20px;font-size:0.9rem;">Continue →</button>
+            <br><br>
+            <button id="quiz-skip" onclick="dismissQuiz()">Skip</button>
+        </div>
+    </div>
 
     <footer>
         Stroke data: <a href="http://kanjivg.tagaini.net" target="_blank">KanjiVG</a>
@@ -675,6 +792,7 @@
         let drawing = false;
         let currentStrokePts = [];
         let completedStrokes = [];
+        let quizActive = false;
 
         function getCurrentCharAndStroke() {
             // Derive current position from completed stroke count
@@ -720,6 +838,8 @@
             if (mode === currentMode) return;
             currentMode = mode;
             currentWordIdx = 0;
+            wordHistory = [];
+            completedWords = 0;
             // Update tab styles
             document.querySelectorAll(".tab[data-mode]").forEach(t => {
                 t.classList.toggle("active", t.dataset.mode === mode);
@@ -1013,7 +1133,17 @@
 
         function nextWord() {
             const words = MODES[currentMode].words;
+            // Record completed word for quiz pool
+            wordHistory.push(words[currentWordIdx]);
+            completedWords++;
+
             currentWordIdx = (currentWordIdx + 1) % words.length;
+
+            // Trigger quiz every N words
+            if (completedWords >= QUIZ_INTERVAL && completedWords % QUIZ_INTERVAL === 0) {
+                showQuiz();
+                return;
+            }
             showWord();
         }
 
@@ -1033,6 +1163,78 @@
             MODES[currentMode].words.push({ word: val, meaning: "Custom search" });
             currentWordIdx = MODES[currentMode].words.length - 1;
             await showWord();
+        }
+
+        // ── Quiz system ───────────────────────────────────────
+        const QUIZ_INTERVAL = 4;
+        let wordHistory = [];
+        let completedWords = 0;
+        let quizAnswered = false;
+
+        function shuffle(arr) {
+            const a = [...arr];
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        }
+
+        function showQuiz() {
+            quizActive = true;
+            quizAnswered = false;
+            document.getElementById("quiz-overlay").style.display = "flex";
+            document.getElementById("quiz-continue").classList.remove("show");
+
+            // Pick a random word from history
+            const entry = wordHistory[Math.floor(Math.random() * wordHistory.length)];
+            const word = entry.word;
+            const blankIdx = Math.floor(Math.random() * word.length);
+            const correctChar = word[blankIdx];
+
+            // Build distractors from all characters in word history
+            const pool = [...new Set(wordHistory.flatMap(e => [...e.word]))]
+                .filter(c => c !== correctChar);
+            const distractors = shuffle(pool).slice(0, 3);
+            const options = shuffle([...distractors, correctChar]);
+
+            // Render word display
+            const displayEl = document.getElementById("quiz-word-display");
+            displayEl.innerHTML = "";
+            [...word].forEach((ch, i) => {
+                const span = document.createElement("span");
+                span.textContent = i === blankIdx ? "？" : ch;
+                span.className = i === blankIdx ? "quiz-blank" : "quiz-char";
+                displayEl.appendChild(span);
+            });
+
+            // Render option tiles
+            const optionsEl = document.getElementById("quiz-options");
+            optionsEl.innerHTML = "";
+            options.forEach(ch => {
+                const tile = document.createElement("button");
+                tile.textContent = ch;
+                tile.className = "quiz-tile";
+                tile.onclick = () => {
+                    if (quizAnswered) return;
+                    quizAnswered = true;
+                    document.querySelectorAll(".quiz-tile").forEach(t => {
+                        t.onclick = null;
+                        if (t.textContent === correctChar) t.classList.add("quiz-correct");
+                        else if (t.textContent === ch) t.classList.add("quiz-wrong");
+                    });
+                    const ok = ch === correctChar;
+                    setResult(ok ? "✓ Quiz: Correct!" : `✗ Quiz: It was 「${correctChar}」`, ok ? "good" : "bad");
+                    document.getElementById("quiz-continue").classList.add("show");
+                };
+                optionsEl.appendChild(tile);
+            });
+        }
+
+        function dismissQuiz() {
+            document.getElementById("quiz-overlay").style.display = "none";
+            quizActive = false;
+            showWord();
         }
 
         // ── Init ──────────────────────────────────────────────
